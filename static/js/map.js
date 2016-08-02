@@ -881,6 +881,8 @@ function initMap () { // eslint-disable-line no-unused-vars
     redrawPokemon(mapData.pokemons)
     redrawPokemon(mapData.lurePokemons)
   })
+
+  initGPXGenerator(map);
 }
 
 function createSearchMarker () {
@@ -1734,6 +1736,121 @@ function i8ln (word) {
     // Word doesn't exist in dictionary return it as is
     return word
   }
+}
+
+function initGPXGenerator(map) {
+  var velocity = 4.4704; // meters per second
+  var markers = [];
+
+  // Only points between from and to
+  var route = function route(from, to, velocity) {
+    var coords = [];
+    var distance = google.maps.geometry.spherical.computeDistanceBetween(from, to);
+    var step = velocity / distance;
+    var i = 0;
+    var fraction;
+
+    while ((fraction = step * ++i) < 1) {
+      var coord = new google.maps.geometry.spherical.interpolate(from, to, fraction);
+      coords.push(coord);
+    }
+
+    return coords;
+  };
+
+  var toGPX = function toGPX(coords) {
+    var now = Date.now();
+
+    return '<gpx>' + coords.map(function (coord, index) {
+      var time = new Date(now + 1000 * index).toISOString().replace(/\.\d+Z$/, 'Z');
+
+      return ['<wpt lat="', coord.lat(), '" lon="', coord.lng(), '"><time>', time, '</time></wpt>'].join('');
+    }).join('') + '</gpx>';
+  };
+
+  var getRouteGPX = function getRouteGPX() {
+    if (markers.length < 2) {
+      return;
+    }
+
+    var waypoints = markers.map(function (marker) {
+      return marker.getPosition();
+    });
+    var coords = [];
+
+    waypoints.push(waypoints[0]);
+    waypoints.reduce(function (from, to) {
+      coords = coords.concat(from, route(from, to, velocity), to);
+      return to;
+    });
+
+    return toGPX(coords);
+  };
+
+  var addMarker = function addMarker(latLng) {
+    var marker = new google.maps.Marker({
+      draggable: true,
+      position: latLng,
+      map: map
+    });
+
+    marker.addListener('click', function () {
+      removeMarker(marker);
+    });
+    marker.addListener('drag', updatePath);
+
+    markers.push(marker);
+    updatePath();
+  };
+
+  var removeMarker = function removeMarker(marker) {
+    var index = markers.indexOf(marker);
+
+    marker.setMap(null);
+    markers.splice(index, 1);
+    updatePath();
+  };
+
+  var removeAllMarkers = function removeAllMarkers() {
+    markers.forEach(function (marker) {
+      marker.setMap(null);
+    });
+
+    markers = [];
+    updatePath();
+  };
+
+  var updatePath = function updatePath() {
+    var path = polyline.getPath();
+
+    path.clear();
+
+    markers.forEach(function (marker) {
+      path.push(marker.getPosition());
+    });
+  };
+
+  var polyline = new google.maps.Polyline({
+    strokeColor: '#000000',
+    strokeOpacity: 1.0,
+    strokeWeight: 3
+  });
+  polyline.setMap(map);
+
+  map.addListener('click', function (e) {
+    addMarker(e.latLng);
+  });
+
+  var copyButton = $('<button>').css('margin', '0 10px 10px 0').text('Copy GPX')[0];
+
+  var clearButton = $('<button>').css('margin', '0 10px 10px 0').text('Clear').click(removeAllMarkers)[0];
+
+  map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(clearButton);
+  map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(copyButton);
+
+  new Clipboard(copyButton, {
+    text: getRouteGPX
+  });
 }
 
 //
